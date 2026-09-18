@@ -906,7 +906,7 @@ function BPT1Module({
                         // Clinical (converted) rows, so the live panel shows the
                         // same angles the report will: interior camera angles are
                         // converted to clinical ROM and scored against the same
-                        // depth-adjusted bands.
+                        // absolute chart bands.
                         setMultiViewRows(result.outOfFrame ? null : window.PF_Pose.evaluateModule1View(activeConfig.key, result));
                     }
                 } else {
@@ -1152,9 +1152,9 @@ function BPT1Module({
         // sourced directly from the clinical squat chart) -- avoids duplicating
         // magic numbers here that can silently drift out of sync. Values are
         // clinical angles (0deg = anatomical neutral), never raw interior
-        // segment angles, and the trunk/hip/ankle bands are depth-adjusted by
-        // pose.js exactly like the report rows are, so the live overlay colours
-        // always agree with the report.
+        // segment angles, and the bands are the chart's absolute four-view bands
+        // applied by pose.js exactly like the report rows are, so the live
+        // overlay colours always agree with the report.
         const STD = window.PF_Pose.standards;
         const depthRatio = analysis.depthRatio === undefined ? 1 : analysis.depthRatio;
         const trunkBand = window.PF_Pose.module1Band(STD.trunk, depthRatio);
@@ -1164,9 +1164,8 @@ function BPT1Module({
         const inBand = (val, band) => val >= band.minNormal && val <= band.maxNormal;
 
         // --- Trunk Lean "default reference guide line" ---------------------
-        // A plumb-line + shaded wedge showing the normal trunk lean corridor
-        // (25deg-50deg at full squat depth, scaled down with the depth actually
-        // reached), anchored at the hip. The person's actual trunk line is
+        // A plumb-line + shaded wedge showing the chart's normal trunk lean
+        // corridor (0deg-5deg), anchored at the hip. The person's actual trunk line is
         // compared against that corridor in real time so any deviation is
         // immediately visible, and the same trunkLean value drives the
         // report's deviation numbers.
@@ -1187,7 +1186,7 @@ function BPT1Module({
             const minB = boundaryPoint(trunkBand.minNormal);
             const maxB = boundaryPoint(trunkBand.maxNormal);
 
-            // Shaded normal-zone wedge between the current (depth-adjusted)
+            // Shaded normal-zone wedge between the chart's normal-zone
             // boundary lines
             ctx.beginPath();
             ctx.moveTo(p0x, p0y);
@@ -1206,7 +1205,7 @@ function BPT1Module({
             ctx.moveTo(p0x, p0y);
             ctx.lineTo(p0x, p0y - L);
             ctx.stroke();
-            // Dashed 30°/45° boundary lines (the chart's normal-zone edges)
+            // Dashed normal-zone boundary lines (the chart's 0°/5° edges)
             ctx.strokeStyle = "rgba(16, 185, 129, 0.7)";
             ctx.beginPath();
             ctx.moveTo(p0x, p0y); ctx.lineTo(minB.x, minB.y);
@@ -1246,8 +1245,8 @@ function BPT1Module({
         drawJointCircle(lShoulder, "white");
         drawJointCircle(rShoulder, "white");
 
-        // Dynamic color for knee based on the clinical knee-flexion / squat
-        // depth minimum (one-sided: only insufficient depth is a deviation)
+        // Dynamic color for knee based on the chart's knee-flexion band
+        // (135deg-150deg normal either side)
         const lKneeColor = inBand(angles.leftKneeFlexion, kneeBand) ? colorNormal : analysis.depthPct > 40 ? colorDev : "#6366f1";
         const rKneeColor = inBand(angles.rightKneeFlexion, kneeBand) ? colorNormal : analysis.depthPct > 40 ? colorDev : "#6366f1";
         drawJointCircle(lKnee, lKneeColor);
@@ -1307,7 +1306,7 @@ function BPT1Module({
         if (rFoot) drawAngleLabel(rFoot, `DF ${Math.round(angles.rightAnkleDorsiflexion)}°`, rAnkleColor);
 
         // Trunk label next to the shoulders, coloured against the same
-        // depth-adjusted corridor the guide above draws.
+        // chart corridor the guide above draws.
         drawAngleLabel(lShoulder, `Trunk ${Math.round(angles.trunkLean)}°`, trunkColor);
     };
     const handleFreezeSnapshot = () => {
@@ -1493,9 +1492,9 @@ function BPT1Module({
         // Trigger Client PDF download
         window.PF_Reports.downloadClientPDF(reportPreviewData);
     };
-    // Depth-adjusted clinical bands for the live side panel -- straight from
-    // pose.js, so the on-screen ranges are the exact ones the report rows are
-    // scored against (trunk/hip/ankle scale down with the squat depth reached).
+    // Clinical bands for the live side panel -- straight from pose.js, so the
+    // on-screen ranges are the exact (absolute) chart bands the report rows are
+    // scored against.
     const liveBand = key => window.PF_Pose.module1Band(window.PF_Pose.standards[key], liveDepthRatio);
     const liveStatusOf = (joint, side) => {
         const rows = assessmentRecord && assessmentRecord.measurements;
@@ -1765,7 +1764,7 @@ function BPT1Module({
         status: row.status
     })), /*#__PURE__*/React.createElement("p", {
         style: { color: "var(--text-muted)", fontSize: 12, marginTop: 4 }
-    }, "Measured values are clinical angles (0° = neutral); bracketed figures on the report are the raw interior camera angles.")) : /*#__PURE__*/React.createElement("p", {
+    }, "Measured values are clinical angles (0° = neutral).")) : /*#__PURE__*/React.createElement("p", {
         style: { color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }
     }, "Align the patient in frame to begin live neck, shoulder, and knee tracking for this view."), /*#__PURE__*/React.createElement("p", {
         style: { color: "var(--text-muted)", fontSize: 13 }
@@ -2857,13 +2856,12 @@ function ReportCanvasPreview({
     // flagged as a deviation; Normal rows show "-" regardless of what was
     // computed under the hood.
     const deviatedSideDisplay = m => (m.status !== "Normal" && m.status !== "Not Assessable" && m.deviatedSide) ? m.deviatedSide : "-";
-    // "Measured Angle" shows the clinical value; when a raw interior camera
-    // angle was converted to produce it (knee/hip), both are shown so no number
-    // is ambiguous about which angle system it belongs to.
+    // "Measured Angle" shows only the clinical value. The raw interior camera
+    // angle a row was converted from is still kept on the row (rawAngle) for
+    // diagnostics, but is no longer printed, so the table stays uncluttered.
     const measuredDisplay = m => {
         const unit = m.unit || "°";
-        const base = `${Math.round(m.angle)}${unit}`;
-        return (m.rawAngle === null || m.rawAngle === undefined) ? base : `${base} (raw ${Math.round(m.rawAngle)}°)`;
+        return `${Math.round(m.angle)}${unit}`;
     };
     const statusClassOf = m => m.status.includes("Significant") ? "text-danger" : m.status.includes("Mild") ? "text-warning" : m.status.includes("Not Assessable") ? "text-muted" : "text-success";
     const renderMeasurementTable = rows => /*#__PURE__*/React.createElement("table", {
